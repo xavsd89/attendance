@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
-import streamlit.components.v1 as components
 
 # Initialize session state for storing data (in-memory)
 if 'employees' not in st.session_state:
@@ -97,8 +96,8 @@ def clock_out_time(employee_name, remarks):
     employee_id = employee['Employee ID']
 
     # Find the corresponding clock-in record from the attendance DataFrame
-    clock_in_record = st.session_state.attendance[
-        (st.session_state.attendance['Employee ID'] == employee_id) &
+    clock_in_record = st.session_state.attendance[(
+        st.session_state.attendance['Employee ID'] == employee_id) & 
         (st.session_state.attendance['Clock Out'].isna())
     ].iloc[0]
 
@@ -125,8 +124,8 @@ def check_late_employees():
         scheduled_start_time = row['Working Hours Start']
         
         # Find if the employee has clocked in today
-        attendance = st.session_state.attendance[
-            (st.session_state.attendance['Employee Name'] == employee_name) & 
+        attendance = st.session_state.attendance[(
+            st.session_state.attendance['Employee Name'] == employee_name) & 
             (st.session_state.attendance['Date'] == datetime.today().strftime('%Y-%m-%d'))
         ]
         
@@ -170,10 +169,10 @@ def main():
         remarks = st.text_area("Remarks")
         
         if action == "Clock In":
-            if st.button(f"Clock In {employee_name}"):
+            if st.button(f"Clock In {employee_name}") :
                 clock_in_time(employee_name, remarks)
         elif action == "Clock Out":
-            if st.button(f"Clock Out {employee_name}"):
+            if st.button(f"Clock Out {employee_name}") :
                 clock_out_time(employee_name, remarks)
     elif choice == "View Attendance":
         st.write("### Employee Attendance")
