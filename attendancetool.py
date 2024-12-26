@@ -192,7 +192,13 @@ def clock_out_time(employee_name, remarks):
     clock_in_record = st.session_state.attendance[(
         st.session_state.attendance['Employee ID'] == employee_id) &
         (st.session_state.attendance['Clock Out'].isna())
-    ].iloc[0]
+    ]
+    
+    if clock_in_record.empty:
+        st.error(f"{employee_name} has not clocked in today!")
+        return  # Prevent clock-out if no clock-in record is found
+
+    clock_in_record = clock_in_record.iloc[0]  # Access the first record safely
 
     clock_in_time = datetime.strptime(clock_in_record['Clock In'], '%Y-%m-%d %H:%M:%S')
     clock_out_time = datetime.strptime(clock_out, '%Y-%m-%d %H:%M:%S')
