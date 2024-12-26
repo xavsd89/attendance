@@ -1,13 +1,12 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
-import requests
-import xml.etree.ElementTree as ET
+import pytz
 
 # Initialize session state for storing data (in-memory)
 if 'employees' not in st.session_state:
-    st.session_state.employees = pd.DataFrame(columns=['Employee ID', 'Employee Name', 'Department', 'Manager', 'Working Hours Start', 'Working Hours End'])
-    st.session_state.attendance = pd.DataFrame(columns=['Employee ID', 'Employee Name', 'Date', 'Clock In', 'Clock Out', 'Worked Hours', 'Status', 'Country', 'Remarks'])
+    st.session_state.employees = pd.DataFrame(columns=['Employee ID', 'Employee Name', 'Department', 'Manager', 'Working Hours Start', 'Working Hours End', 'Timezone'])
+    st.session_state.attendance = pd.DataFrame(columns=['Employee ID', 'Employee Name', 'Date', 'Clock In', 'Clock Out', 'Worked Hours', 'Status', 'Remarks'])
     st.session_state.next_employee_id = 1
     st.session_state.next_attendance_id = 1
 
@@ -32,6 +31,9 @@ def add_employee():
             # Add Employee ID column
             new_employees['Employee ID'] = range(st.session_state.next_employee_id, st.session_state.next_employee_id + len(new_employees))
 
+            # Add a default timezone (can be changed later on the Clock In/Out page)
+            new_employees['Timezone'] = 'UTC'  # Default timezone (change as needed)
+
             # Update the employees DataFrame
             st.session_state.employees = pd.concat([st.session_state.employees, new_employees], ignore_index=True)
             st.session_state.next_employee_id += len(new_employees)
@@ -43,86 +45,19 @@ def add_employee():
 
     # Show the list of current employees
     st.write("### Current Employees List")
-    st.dataframe(st.session_state.employees[['Employee ID', 'Employee Name', 'Department', 'Manager', 'Working Hours Start', 'Working Hours End']])
+    st.dataframe(st.session_state.employees[['Employee ID', 'Employee Name', 'Department', 'Manager', 'Working Hours Start', 'Working Hours End', 'Timezone']])
 
-# Function to check who is still late (or haven't clocked in)
-def check_late_employees():
-    late_employees = []
-    not_clocked_in = []
+# Function to get the current time in the employee's selected timezone
+def get_time_in_timezone(timezone_str):
+    tz = pytz.timezone(timezone_str)
+    return datetime.now(tz)
 
-    for _, row in st.session_state.employees.iterrows():
-        employee_name = row['Employee Name']
-        
-        # Find if the employee has clocked in today
-        attendance = st.session_state.attendance[(
-            st.session_state.attendance['Employee Name'] == employee_name) & 
-            (st.session_state.attendance['Date'] == datetime.today().strftime('%Y-%m-%d'))
-        ]
-        
-        if attendance.empty:
-            # If no clock-in found, add the employee to "not clocked in" list
-            not_clocked_in.append(employee_name)
-        else:
-            clock_in_time = attendance.iloc[0]['Clock In']
-            status = attendance.iloc[0]['Status']
-
-            # Check if the employee is late
-            if status == 'Late':
-                late_employees.append(employee_name)
-
-    # Display late employees
-    if late_employees:
-        st.write(f"### Late Employees ({len(late_employees)})")
-        st.write(", ".join(late_employees))
-    else:
-        st.success("No employees are late today!")
-
-    # Display employees who haven't clocked in yet
-    if not_clocked_in:
-        st.write(f"### Employees who haven't clocked in yet ({len(not_clocked_in)})")
-        st.write(", ".join(not_clocked_in))
-    else:
-        st.success("All employees have clocked in today!")
-
-# Function to get the country from latitude and longitude using reverse geocoding
-# def get_country_from_lat_lon(latitude, longitude):
-#     api_url = f"https://geocode.xyz/{latitude},{longitude}?geoit=xml&auth=86896060716553563905x36977"
-#     
-#     # Send the request
-#     response = requests.get(api_url)
-#     
-#     # Parse the XML response
-#     tree = ET.ElementTree(ET.fromstring(response.text))
-#     root = tree.getroot()
-#     
-#     # Look for the 'country' element in the XML response
-#     country = root.find('.//country')
-#     
-#     if country is not None:
-#         return country.text
-#     else:
-#         return 'Unknown'
-
-# Function to get the user's location based on IP address
-# def get_ip_geolocation():
-#     response = requests.get("http://ipinfo.io/json")
-#     data = response.json()
-#     
-#     # Extract the latitude and longitude from the IP-based geolocation
-#     location = data.get('loc', '').split(',')
-#     if len(location) == 2:
-#         latitude = location[0]
-#         longitude = location[1]
-#         return latitude, longitude
-#     else:
-#         return None, None
-
-# Clock In function with grace period check
+# Clock In function with timezone handling
 def clock_in_time(employee_name, remarks):
     # Check if the employee has already clocked in today
     today = datetime.today().strftime('%Y-%m-%d')
     attendance = st.session_state.attendance[(
-        st.session_state.attendance['Employee Name'] == employee_name) &
+        st.session_state.attendance['Employee Name'] == employee_name) & 
         (st.session_state.attendance['Date'] == today)
     ]
 
@@ -130,13 +65,15 @@ def clock_in_time(employee_name, remarks):
         st.warning(f"{employee_name} has already clocked in today!")
         return  # Prevent duplicate clock-in
 
-    # Get current time and format it
-    clock_in = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-
-    # Find the employee
+    # Get the employee details
     employee = st.session_state.employees[st.session_state.employees['Employee Name'] == employee_name].iloc[0]
     employee_id = employee['Employee ID']
     scheduled_start_time_str = employee['Working Hours Start']
+    timezone_str = employee['Timezone']  # Get the employee's timezone
+
+    # Get current local time in the employee's timezone
+    local_time = get_time_in_timezone(timezone_str)
+    clock_in = local_time.strftime('%Y-%m-%d %H:%M:%S')
 
     # Convert the scheduled start time to a datetime object (including seconds if needed)
     scheduled_start_time = datetime.strptime(f"{datetime.today().strftime('%Y-%m-%d')} {scheduled_start_time_str}", '%Y-%m-%d %H:%M:%S')
@@ -144,23 +81,14 @@ def clock_in_time(employee_name, remarks):
     # Calculate the grace period (30 minutes after the scheduled start time)
     grace_period_end_time = scheduled_start_time + timedelta(minutes=30)
 
-    # Convert clock-in time to datetime object
+    # Convert clock-in time to datetime object for comparison
     clock_in_time = datetime.strptime(clock_in, '%Y-%m-%d %H:%M:%S')
 
-    # Determine status based on comparison between clock-in time and grace period
+    # Determine if the employee is late
     if clock_in_time > grace_period_end_time:
         status = 'Late'
     else:
         status = 'On Time'
-
-    # Get the user's country based on IP geolocation
-    # latitude, longitude = get_ip_geolocation()
-    # if latitude and longitude:
-    #     country = get_country_from_lat_lon(latitude, longitude)
-    # else:
-    #     country = 'Unknown'
-    
-    country = 'Unknown'  # Placeholder for geolocation, as it's commented out
 
     # Create a new attendance record
     attendance_record = {
@@ -171,7 +99,6 @@ def clock_in_time(employee_name, remarks):
         'Clock Out': None,
         'Worked Hours': None,
         'Status': status,
-        'Country': country,
         'Remarks': remarks
     }
 
@@ -180,13 +107,18 @@ def clock_in_time(employee_name, remarks):
 
     st.success(f"{employee_name} clocked in at {clock_in}. Status: {status}")
 
-# Clock Out function (No changes to status here)
+# Clock Out function with timezone handling
 def clock_out_time(employee_name, remarks):
     clock_out = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
     # Find the employee
     employee = st.session_state.employees[st.session_state.employees['Employee Name'] == employee_name].iloc[0]
     employee_id = employee['Employee ID']
+    timezone_str = employee['Timezone']  # Get the employee's timezone
+
+    # Get current local time in the employee's timezone
+    local_time = get_time_in_timezone(timezone_str)
+    clock_out = local_time.strftime('%Y-%m-%d %H:%M:%S')
 
     # Find the corresponding clock-in record from the attendance DataFrame
     clock_in_record = st.session_state.attendance[(
@@ -213,11 +145,37 @@ def clock_out_time(employee_name, remarks):
 
     st.success(f"{employee_name} clocked out at {clock_out}, worked {worked_hours:.2f} hours.")
 
+# Function to check employees who have not clocked in today
+def check_not_clocked_in():
+    not_clocked_in = []
+    today = datetime.today().strftime('%Y-%m-%d')
+
+    # Loop through each employee and check if they've clocked in today
+    for _, row in st.session_state.employees.iterrows():
+        employee_name = row['Employee Name']
+        
+        # Find if the employee has clocked in today
+        attendance = st.session_state.attendance[(
+            st.session_state.attendance['Employee Name'] == employee_name) & 
+            (st.session_state.attendance['Date'] == today)
+        ]
+        
+        if attendance.empty:
+            # If no clock-in found, add the employee to "not clocked in" list
+            not_clocked_in.append(employee_name)
+
+    # Display employees who haven't clocked in yet
+    if not_clocked_in:
+        st.write(f"### Employees who haven't clocked in yet ({len(not_clocked_in)})")
+        st.write(", ".join(not_clocked_in))
+    else:
+        st.success("All employees have clocked in today!")
+
 # Main UI function
 def main():
     st.title("Employee Attendance Tracker")
     
-    menu = ["Add Employee", "Clock In/Out", "View Attendance", "Who is still late?"]
+    menu = ["Add Employee", "Clock In/Out", "View Attendance", "Who is still not clocked in?"]
     choice = st.sidebar.selectbox("Select an Option", menu)
     
     if choice == "Add Employee":
@@ -225,6 +183,11 @@ def main():
     elif choice == "Clock In/Out":
         employee_name = st.selectbox("Select Employee", st.session_state.employees['Employee Name'])
         remarks = st.text_input("Enter Remarks")
+        timezone = st.selectbox("Select Timezone", pytz.all_timezones)  # Allow the user to select the timezone
+
+        # Update the employee's timezone when the user selects a new one
+        st.session_state.employees.loc[st.session_state.employees['Employee Name'] == employee_name, 'Timezone'] = timezone
+        
         action = st.radio("Clock Action", ["Clock In", "Clock Out"])
 
         if action == "Clock In":
@@ -236,12 +199,8 @@ def main():
     elif choice == "View Attendance":
         st.write("### Employee Attendance List")
         st.dataframe(st.session_state.attendance)
-    elif choice == "Who is still late?":
-        st.write("### Check Who is Still Late or Not Clocked In")
-
-        # Add a "Refresh" button to check for late employees
-        if st.button("Refresh Late Employees List"):
-            check_late_employees()
+    elif choice == "Who is still not clocked in?":
+        check_not_clocked_in()
 
 if __name__ == "__main__":
     main()
