@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+import streamlit.components.v1 as components
 
 # Initialize session state for storing data (in-memory)
 if 'employees' not in st.session_state:
@@ -63,6 +64,15 @@ def clock_in_time(employee_name, remarks):
     # Convert clock-in time to datetime object
     clock_in_time = datetime.strptime(clock_in, '%Y-%m-%d %H:%M:%S')
 
+    # Check if the employee has already clocked in today
+    existing_record = st.session_state.attendance[(
+        st.session_state.attendance['Employee Name'] == employee_name) & 
+        (st.session_state.attendance['Date'] == datetime.today().strftime('%Y-%m-%d'))]
+
+    if not existing_record.empty:
+        st.error(f"{employee_name} has already clocked in today. Please clock out before clocking in again.")
+        return
+
     # Determine status based on comparison between clock-in time and grace period
     if clock_in_time > grace_period_end_time:
         status = 'Late'
@@ -89,30 +99,39 @@ def clock_in_time(employee_name, remarks):
 
 # Clock Out function (No changes to status here)
 def clock_out_time(employee_name, remarks):
-    clock_out = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    try:
+        clock_out = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-    # Find the employee
-    employee = st.session_state.employees[st.session_state.employees['Employee Name'] == employee_name].iloc[0]
-    employee_id = employee['Employee ID']
+        # Find the employee
+        employee = st.session_state.employees[st.session_state.employees['Employee Name'] == employee_name].iloc[0]
+        employee_id = employee['Employee ID']
 
-    # Find the corresponding clock-in record from the attendance DataFrame
-    clock_in_record = st.session_state.attendance[(
-        st.session_state.attendance['Employee ID'] == employee_id) & 
-        (st.session_state.attendance['Clock Out'].isna())
-    ].iloc[0]
+        # Find the corresponding clock-in record from the attendance DataFrame
+        clock_in_record = st.session_state.attendance[(
+            st.session_state.attendance['Employee ID'] == employee_id) & 
+            (st.session_state.attendance['Clock Out'].isna())
+        ]
 
-    clock_in_time = datetime.strptime(clock_in_record['Clock In'], '%Y-%m-%d %H:%M:%S')
-    clock_out_time = datetime.strptime(clock_out, '%Y-%m-%d %H:%M:%S')
+        # Check if the employee has clocked in today
+        if clock_in_record.empty:
+            st.error(f"{employee_name} has not clocked in today!")
+            return
 
-    # Calculate worked hours
-    worked_hours = (clock_out_time - clock_in_time).total_seconds() / 3600  # Convert seconds to hours
+        clock_in_time = datetime.strptime(clock_in_record.iloc[0]['Clock In'], '%Y-%m-%d %H:%M:%S')
+        clock_out_time = datetime.strptime(clock_out, '%Y-%m-%d %H:%M:%S')
 
-    # Update the attendance record with clock-out time, worked hours, and status
-    st.session_state.attendance.loc[st.session_state.attendance['Employee ID'] == employee_id, 'Clock Out'] = clock_out
-    st.session_state.attendance.loc[st.session_state.attendance['Employee ID'] == employee_id, 'Worked Hours'] = worked_hours
-    st.session_state.attendance.loc[st.session_state.attendance['Employee ID'] == employee_id, 'Remarks'] = remarks
+        # Calculate worked hours
+        worked_hours = (clock_out_time - clock_in_time).total_seconds() / 3600  # Convert seconds to hours
 
-    st.success(f"{employee_name} clocked out at {clock_out}, worked {worked_hours:.2f} hours.")
+        # Update the attendance record with clock-out time, worked hours, and remarks
+        st.session_state.attendance.loc[st.session_state.attendance['Employee ID'] == employee_id, 'Clock Out'] = clock_out
+        st.session_state.attendance.loc[st.session_state.attendance['Employee ID'] == employee_id, 'Worked Hours'] = worked_hours
+        st.session_state.attendance.loc[st.session_state.attendance['Employee ID'] == employee_id, 'Remarks'] = remarks
+
+        st.success(f"{employee_name} clocked out at {clock_out}, worked {worked_hours:.2f} hours.")
+
+    except Exception as e:
+        st.error(f"Error during clock-out: {e}")
 
 # Function to check who is still late (or haven't clocked in)
 def check_late_employees():
@@ -169,10 +188,10 @@ def main():
         remarks = st.text_area("Remarks")
         
         if action == "Clock In":
-            if st.button(f"Clock In {employee_name}") :
+            if st.button(f"Clock In {employee_name}"):
                 clock_in_time(employee_name, remarks)
         elif action == "Clock Out":
-            if st.button(f"Clock Out {employee_name}") :
+            if st.button(f"Clock Out {employee_name}"):
                 clock_out_time(employee_name, remarks)
     elif choice == "View Attendance":
         st.write("### Employee Attendance")
